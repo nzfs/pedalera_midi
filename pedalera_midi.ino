@@ -1,16 +1,15 @@
-//--------------------//
-// nzfs 2020          //
-// nzfs@nzfs.net      //
-// nzfs.net           //
-//--------------------//
+//----------------//
+// v 0.1          //
+// nzfs 2020      //
+// nzfs@nzfs.net  //
+// nzfs.net       //
+//----------------//
 
 #include <MIDI.h>
 #include "Contador.h"
 
-//#define MOMENTARY
-//#define TOGGLE
-
 MIDI_CREATE_DEFAULT_INSTANCE();
+int canal = 1;
 
 // pulsadores
 const int PULSADOR_01 = 2;
@@ -41,15 +40,10 @@ String modo;
 Contador contador01;
 Contador contador02;
 
-bool timer;
-int tiempoTranscurrido;
-int tiempoActual;
-
 //-------------------------------------------------------
 
 void setup()
 {
-  //Serial.begin(9600);
   Serial.begin(31250);
   MIDI.begin(MIDI_CHANNEL_OMNI);
 
@@ -79,7 +73,6 @@ void loop()
   leerPulsadores();
 
   // MOMENTARY //
-  //#ifdef MOMENTARY
   if (modo.equals("momentary"))
   {
     for (int i = 0; i < 6; ++i)
@@ -89,20 +82,19 @@ void loop()
         if (!flag[i])
         {
           flag[i] = true;
-          MIDI.sendControlChange(100 + i, 127, 1);
+          MIDI.sendControlChange(100 + i, 127, canal);
         }
       } else
       {
         if (flag[i])
         {
-          MIDI.sendControlChange(100 + i, 0, 1);
+          MIDI.sendControlChange(100 + i, 0, canal);
           flag[i] = false;
         }
       }
     }
   } else if (modo.equals("toggle"))
   {
-    //#endif
     // TOGGLE //
     for (int i = 0; i < 6; ++i)
     {
@@ -112,11 +104,11 @@ void loop()
         {
           if (estado[i] == HIGH)
           {
-            MIDI.sendControlChange(100 + i, 127, 1);
+            MIDI.sendControlChange(100 + i, 127, canal);
             estado[i] = LOW;
           } else
           {
-            MIDI.sendControlChange(100 + i, 0, 1);
+            MIDI.sendControlChange(100 + i, 0, canal);
             estado[i] = HIGH;
           }
           delay(10); // debounce
@@ -133,9 +125,9 @@ void loop()
       previo[i] = estadoPulsadores[i];
     }
   }
-  //#endif
 
   // cambio de modo
+  // mantener presionado el pulsador 0 para pasar a modo momentary
   if (estadoPulsadores[0] == HIGH && modo.equals("toggle"))
   {
     contador01.contador();
@@ -155,6 +147,7 @@ void loop()
     contador01.timer = true;
   }
 
+  // mantener presionado el pulsador 1 para pasar el modo toggle
   if (estadoPulsadores[1] == HIGH && modo.equals("momentary"))
   {
     contador02.contador();
@@ -188,14 +181,3 @@ void leerPulsadores()
 }
 
 //-------------------------------------------------------
-/*
-  void contador()
-  {
-  if (timer)
-  {
-    tiempoTranscurrido = millis();
-    timer = false;
-  }
-  tiempoActual = millis() - tiempoTranscurrido;
-  }
-*/
