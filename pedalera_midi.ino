@@ -5,6 +5,11 @@
 // nzfs.net       //
 //----------------//
 
+// TODO
+// diferentes escenas ?
+// selector de canal
+// display escena actual y canal en modo selector de canal
+
 #include <MIDI.h>
 #include "Contador.h"
 
@@ -29,16 +34,23 @@ int previo[6];
 
 // display
 const int LED =  13;
+const int LED_PULSADOR[] = {8, 9, 10, 11, 12, 13};
 
-// escenas
-int escenas[4];
+const int LED_TOGGLE;
+const int LED_MOMENTARY;
+
+// ESCENA
+const int ESCENA[4];
 
 // modos
 String modo;
 
-// contador para cambio de modos y escenas
-Contador contador01;
-Contador contador02;
+// contador para cambio de modos y ESCENA
+Contador contadorModo01;
+Contador contadorModo02;
+
+Contador contadorEscenaSiguiente;
+Contador contadorEscenaAnterior;
 
 //-------------------------------------------------------
 
@@ -82,13 +94,17 @@ void loop()
         if (!flag[i])
         {
           flag[i] = true;
+          digitalWrite(LED_PULSADOR[i], HIGH);
+          delay(10);
           MIDI.sendControlChange(100 + i, 127, canal);
         }
       } else
       {
         if (flag[i])
         {
-          MIDI.sendControlChange(100 + i, 0, canal);
+          digitalWrite(LED_PULSADOR[i], LOW);
+          delay(10);
+         // MIDI.sendControlChange(100 + i, 0, canal);
           flag[i] = false;
         }
       }
@@ -104,10 +120,12 @@ void loop()
         {
           if (estado[i] == HIGH)
           {
+            digitalWrite(LED_PULSADOR[i], HIGH);
             MIDI.sendControlChange(100 + i, 127, canal);
             estado[i] = LOW;
           } else
           {
+            digitalWrite(LED_PULSADOR[i], LOW);
             MIDI.sendControlChange(100 + i, 0, canal);
             estado[i] = HIGH;
           }
@@ -130,9 +148,9 @@ void loop()
   // mantener presionado el pulsador 0 para pasar a modo momentary
   if (estadoPulsadores[0] == HIGH && modo.equals("toggle"))
   {
-    contador01.contador();
-    contador01.timer = false;
-    if (contador01.tiempoActual >= 1000)
+    contadorModo01.contador();
+    contadorModo01.timer = false;
+    if (contadorModo01.tiempoActual >= 1000)
     {
       if (modo.equals("toggle"))
       {
@@ -144,15 +162,15 @@ void loop()
   }
   else if (estadoPulsadores[0] == LOW)
   {
-    contador01.timer = true;
+    contadorModo01.timer = true;
   }
 
   // mantener presionado el pulsador 1 para pasar el modo toggle
   if (estadoPulsadores[1] == HIGH && modo.equals("momentary"))
   {
-    contador02.contador();
-    contador02.timer = false;
-    if (contador02.tiempoActual >= 1000)
+    contadorModo02.contador();
+    contadorModo02.timer = false;
+    if (contadorModo02.tiempoActual >= 1000)
     {
       if (modo.equals("momentary"))
       {
@@ -164,7 +182,7 @@ void loop()
   }
   else if (estadoPulsadores[1] == LOW)
   {
-    contador02.timer = true;
+    contadorModo02.timer = true;
   }
 }
 
