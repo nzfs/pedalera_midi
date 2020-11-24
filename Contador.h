@@ -4,7 +4,7 @@ class Contador
     bool timer;
     int tiempoTranscurrido;
     int tiempoActual;
- 
+
     Contador()
     {
     }

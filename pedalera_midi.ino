@@ -1,20 +1,14 @@
 //----------------//
-// v 0.1          //
+// v 0.2          //
 // nzfs 2020      //
 // nzfs@nzfs.net  //
 // nzfs.net       //
 //----------------//
 
-// TODO
-// diferentes escenas ?
-// selector de canal
-// display escena actual y canal en modo selector de canal
-
 #include <MIDI.h>
 #include "Contador.h"
 
 MIDI_CREATE_DEFAULT_INSTANCE();
-int canal = 1;
 
 // pulsadores
 const int PULSADOR_01 = 2;
@@ -32,25 +26,40 @@ int estado[6];
 int reading[6];
 int previo[6];
 
-// display
-const int LED =  13;
+// leds
 const int LED_PULSADOR[] = {8, 9, 10, 11, 12, 13};
 
-const int LED_TOGGLE;
-const int LED_MOMENTARY;
+// canal por el cual estoy transmitiendo
+const int LED_CANAL[] = {8, 9, 10, 11, 12, 13};
+
+// led RGB que indica el modo actual
+const int RGB_R = A0;
+const int RGB_G = A1;
+const int RGB_B = A2;
 
 // ESCENA
-const int ESCENA[4];
+const int LED_ESCENA[] = {8, 9, 10, 11, 12, 13};
+int escenaActual;
+int canalActual = 1;
+const int ESCENA[6];
+bool flagEscena;
+bool flagCanal;
+bool flagCanalSiguiente;
+bool flagCanalAnterior;
+
+// mensajes
+int CC = 100;
 
 // modos
 String modo;
 
 // contador para cambio de modos y ESCENA
-Contador contadorModo01;
-Contador contadorModo02;
-
-Contador contadorEscenaSiguiente;
-Contador contadorEscenaAnterior;
+Contador contadorToggle;
+Contador contadorMomentary;
+Contador contadorCanal;
+Contador contadorEscena;
+Contador contadorEscenaOff;
+Contador contadorCanalOff;
 
 //-------------------------------------------------------
 
@@ -59,14 +68,21 @@ void setup()
   Serial.begin(31250);
   MIDI.begin(MIDI_CHANNEL_OMNI);
 
-  pinMode(LED, OUTPUT);
-
   pinMode(PULSADOR_01, INPUT);
   pinMode(PULSADOR_02, INPUT);
   pinMode(PULSADOR_03, INPUT);
   pinMode(PULSADOR_04, INPUT);
   pinMode(PULSADOR_05, INPUT);
   pinMode(PULSADOR_06, INPUT);
+
+  for (int i = 0; i < sizeof(LED_PULSADOR); ++i)
+  {
+    pinMode(LED_PULSADOR[i], OUTPUT);
+  }
+
+  pinMode(RGB_R, OUTPUT);
+  pinMode(RGB_G, OUTPUT);
+  pinMode(RGB_B, OUTPUT);
 
   for (int i = 0; i < sizeof(estadoPulsadores); ++i)
   {
@@ -76,13 +92,19 @@ void setup()
   }
 
   modo = "toggle";
+  digitalWrite(RGB_G, HIGH);
+  escenaActual = 0;
+  selectorDeEscena(escenaActual);
+  canalActual = 3;
+  flagCanalSiguiente = false;
+  flagCanalAnterior = false;
 }
 
 //-------------------------------------------------------
 
 void loop()
 {
-  leerPulsadores();
+  leerPulsadores(); // leo el estado de los pulsadores
 
   // MOMENTARY //
   if (modo.equals("momentary"))
@@ -96,7 +118,7 @@ void loop()
           flag[i] = true;
           digitalWrite(LED_PULSADOR[i], HIGH);
           delay(10);
-          MIDI.sendControlChange(100 + i, 127, canal);
+          MIDI.sendControlChange(CC + i, 127, canalActual + 1);
         }
       } else
       {
@@ -104,7 +126,7 @@ void loop()
         {
           digitalWrite(LED_PULSADOR[i], LOW);
           delay(10);
-         // MIDI.sendControlChange(100 + i, 0, canal);
+          // MIDI.sendControlChange(CC + i, 0, canalActual + 1);
           flag[i] = false;
         }
       }
@@ -121,12 +143,12 @@ void loop()
           if (estado[i] == HIGH)
           {
             digitalWrite(LED_PULSADOR[i], HIGH);
-            MIDI.sendControlChange(100 + i, 127, canal);
+            MIDI.sendControlChange(CC + i, 127, canalActual + 1);
             estado[i] = LOW;
           } else
           {
             digitalWrite(LED_PULSADOR[i], LOW);
-            MIDI.sendControlChange(100 + i, 0, canal);
+            MIDI.sendControlChange(CC + i, 0, canalActual + 1);
             estado[i] = HIGH;
           }
           delay(10); // debounce
@@ -142,48 +164,204 @@ void loop()
       }
       previo[i] = estadoPulsadores[i];
     }
+  } else if (modo.equals("escena"))
+  {
+    //  SELECTOR DE ESCENAS //
+    for (int i = 0; i < 5; ++i)
+    {
+      if (estadoPulsadores[i] == HIGH)
+      {
+        escenaActual = i;
+      }
+      if (escenaActual == i)
+      {
+        digitalWrite(LED_PULSADOR[i], HIGH);
+      } else
+      {
+        digitalWrite(LED_PULSADOR[i], LOW);
+      }
+    }
+    selectorDeEscena(escenaActual);
+
+  } else if (modo.equals("canal"))
+  {
+    if (estadoPulsadores[1] == HIGH)
+    {
+      if (!flagCanalSiguiente && canalActual <= 15)
+      {
+        canalActual++;
+        flagCanalSiguiente = true;
+        delay(10);
+      }
+    } else if (estadoPulsadores[1] == LOW)
+    {
+      flagCanalSiguiente = false;
+    }
+    if (estadoPulsadores[4] == HIGH)
+    {
+      if (!flagCanalAnterior && canalActual >= 0)
+      {
+        canalActual--;
+        flagCanalAnterior = true;
+        delay(10);
+      }
+    } else if (estadoPulsadores[4] == LOW)
+    {
+      flagCanalAnterior = false;
+    }
+    selectorDeCanal(canalActual);
   }
 
-  // cambio de modo
+  // CAMBIO DE MODO //
   // mantener presionado el pulsador 0 para pasar a modo momentary
-  if (estadoPulsadores[0] == HIGH && modo.equals("toggle"))
+  if (estadoPulsadores[0] == HIGH && modo.equals("toggle") ||
+      estadoPulsadores[0] == HIGH && modo.equals("escena"))
   {
-    contadorModo01.contador();
-    contadorModo01.timer = false;
-    if (contadorModo01.tiempoActual >= 1000)
+    contadorToggle.contador();
+    contadorToggle.timer = false;
+    if (contadorToggle.tiempoActual >= 1000)
     {
       if (modo.equals("toggle"))
       {
         modo = "momentary";
-        digitalWrite(LED, HIGH);
+        digitalWrite(RGB_R, LOW);
+        digitalWrite(RGB_G, LOW);
+        digitalWrite(RGB_B, HIGH);
+        // apago led
+        apagarLeds();
         delay(10);
       }
     }
   }
   else if (estadoPulsadores[0] == LOW)
   {
-    contadorModo01.timer = true;
+    contadorToggle.timer = true;
   }
 
   // mantener presionado el pulsador 1 para pasar el modo toggle
-  if (estadoPulsadores[1] == HIGH && modo.equals("momentary"))
+  if (estadoPulsadores[1] == HIGH && modo.equals("momentary") ||
+      estadoPulsadores[1] == HIGH && modo.equals("escena"))
   {
-    contadorModo02.contador();
-    contadorModo02.timer = false;
-    if (contadorModo02.tiempoActual >= 1000)
+    contadorMomentary.contador();
+    contadorMomentary.timer = false;
+    if (contadorMomentary.tiempoActual >= 1000)
     {
       if (modo.equals("momentary"))
       {
         modo = "toggle";
-        digitalWrite(LED, LOW);
+        digitalWrite(RGB_R, LOW);
+        digitalWrite(RGB_G, HIGH);
+        digitalWrite(RGB_B, LOW);
         delay(10);
       }
     }
   }
   else if (estadoPulsadores[1] == LOW)
   {
-    contadorModo02.timer = true;
+    contadorMomentary.timer = true;
   }
+
+  // mantener presionado el pulsador 5 para el modo escena
+  if (estadoPulsadores[5] == HIGH && modo.equals("toggle") ||
+      estadoPulsadores[5] == HIGH && modo.equals("momentary"))
+  {
+    contadorEscena.contador();
+    contadorEscena.timer = false;
+    if (contadorEscena.tiempoActual >= 1000)
+    {
+      if (modo.equals("momentary") || modo.equals("toggle"))
+      {
+        modo = "escena";
+        digitalWrite(RGB_R, HIGH);
+        digitalWrite(RGB_G, LOW);
+        digitalWrite(RGB_B, LOW);
+        apagarLeds();
+        flagEscena = true;
+        delay(10);
+      }
+    }
+  }
+  else if (estadoPulsadores[5] == LOW)
+  {
+    contadorEscena.timer = true;
+    flagEscena = false;
+  }
+
+  // salir del modo escena
+  if (estadoPulsadores[5] == HIGH && modo.equals("escena") && !flagEscena)
+  {
+    contadorEscenaOff.contador();
+    contadorEscenaOff.timer = false;
+    if (contadorEscenaOff.tiempoActual >= 1000)
+    {
+      if (modo.equals("escena"))
+      {
+        modo = "toggle";
+        digitalWrite(RGB_R, LOW);
+        digitalWrite(RGB_G, HIGH);
+        digitalWrite(RGB_B, LOW);
+        apagarLeds();
+        delay(10);
+      }
+    }
+  }
+  else if (estadoPulsadores[5] == LOW)
+  {
+    contadorEscenaOff.timer = true;
+  }
+
+  // CANAL //
+  // mantener presionado el pulsador 2 para el selector de canal
+  if (estadoPulsadores[2] == HIGH && modo.equals("toggle") ||
+      estadoPulsadores[2] == HIGH && modo.equals("momentary"))
+  {
+    contadorCanal.contador();
+    contadorCanal.timer = false;
+    if (contadorCanal.tiempoActual >= 1000)
+    {
+      if (modo.equals("momentary") || modo.equals("toggle"))
+      {
+        modo = "canal";
+        digitalWrite(RGB_R, HIGH);
+        digitalWrite(RGB_G, HIGH);
+        digitalWrite(RGB_B, HIGH);
+        flagCanal = true;
+        apagarLeds();
+        delay(10);
+      }
+    }
+  }
+  else if (estadoPulsadores[2] == LOW)
+  {
+    contadorCanal.timer = true;
+    flagCanal = false;
+  }
+  // salir del modo canal
+  if (estadoPulsadores[0] == HIGH && modo.equals("canal") && !flagCanal)
+  {
+    contadorCanalOff.contador();
+    contadorCanalOff.timer = false;
+    if (contadorCanalOff.tiempoActual >= 1000)
+    {
+      if (modo.equals("canal"))
+      {
+        for (int i = 0; i < 6; ++i)
+        {
+          digitalWrite(LED_PULSADOR[i], LOW);
+        }
+        modo = "toggle";
+        digitalWrite(RGB_R, LOW);
+        digitalWrite(RGB_G, HIGH);
+        digitalWrite(RGB_B, LOW);
+        delay(10);
+      }
+    }
+  }
+  else if (estadoPulsadores[0] == LOW)
+  {
+    contadorCanalOff.timer = true;
+  }
+
 }
 
 //-------------------------------------------------------
@@ -199,3 +377,216 @@ void leerPulsadores()
 }
 
 //-------------------------------------------------------
+
+void apagarLeds()
+{
+  for (int i = 0; i < 6; ++i)
+  {
+    digitalWrite(LED_PULSADOR[i], LOW);
+  }
+}
+
+//-------------------------------------------------------
+
+void selectorDeEscena(int _escenaActual)
+{
+  switch (_escenaActual)
+  {
+    case 0:
+      CC = 100;
+      break;
+    case 1:
+      break;
+    case 2:
+      break;
+    case 3:
+      break;
+    case 4:
+      break;
+  }
+}
+
+//-------------------------------------------------------
+
+void selectorDeCanal(int _canalActual)
+{
+  switch (_canalActual)
+  {
+    case 0:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], HIGH);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], LOW);
+      }
+      break;
+    case 1:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], HIGH);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], LOW);
+      }
+      break;
+    case 2:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], HIGH);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], LOW);
+      }
+      break;
+    case 3:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], HIGH);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], LOW);
+      }
+      break;
+    case 4:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], LOW);
+      }
+      break;
+    case 5:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 6:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], HIGH);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 7:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], HIGH);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 8:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], HIGH);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 9:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], HIGH);
+        digitalWrite(LED_PULSADOR[4], LOW);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 10:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 11:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], HIGH);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 12:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], HIGH);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 13:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], HIGH);
+        digitalWrite(LED_PULSADOR[3], LOW);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 14:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], LOW);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], HIGH);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+    case 15:
+      if (modo = "canal")
+      {
+        digitalWrite(LED_PULSADOR[0], HIGH);
+        digitalWrite(LED_PULSADOR[1], LOW);
+        digitalWrite(LED_PULSADOR[2], LOW);
+        digitalWrite(LED_PULSADOR[3], HIGH);
+        digitalWrite(LED_PULSADOR[4], HIGH);
+        digitalWrite(LED_PULSADOR[5], HIGH);
+      }
+      break;
+  }
+}
